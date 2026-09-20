@@ -166,11 +166,13 @@ for testers with prepared files.
 
 IQ3 defaults to CPU vision with `--no-mmproj-offload`, leaving more GPU memory for inference. To use GPU vision explicitly, pass `-VisionDevice gpu`. IQ4 continues to default to CPU vision.
 
-Other switches include `-Port`, `-ListenHost`, `-Mtp`, `-VisionDevice cpu|gpu`,
+Other switches include `-Port`, `-ListenHost`, `-ApiKey`, `-Mtp`, `-VisionDevice cpu|gpu`,
 `-ReasoningBudget`, `-ChatTemplateFile`, `-ChatTemplateKwargs`, `-UiDir`, `-NoUi`.
 `-ListenHost` (or `HOST` / `LLAMA_ARG_HOST`) selects the bind address; the
 default `127.0.0.1` only serves this machine, so pass `-ListenHost 0.0.0.0` to
 serve the API on your LAN.
+`-ApiKey KEY` (or `-ApiKeyFile PATH`, mirroring llama-server) requires
+`Authorization: Bearer KEY` / `X-Api-Key` on every route except `/health`;
 Reasoning effort follows the model template unless explicitly set. Sampling uses
 the same server defaults as Linux and remains configurable per API request.
 
