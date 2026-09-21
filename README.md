@@ -24,7 +24,8 @@
 > **推荐参数**：
 > 
 > ```bash
-> -c 262144 -ngl 99 --kv-dtype q8_0 --kvmem-budget 16384 --kvmem-gen-reserve 4096 \
+> -c 262144 -ngl 99 --kv-dtype q8_0 \
+>  --kvmem-budget 20480 --kvmem-gen-reserve 8192 --kvmem-block-tokens 32 \
 >  --port 8080 -ub 128 -b 512
 > ```
 > 
@@ -53,7 +54,8 @@
 > **Recommended parameters**:
 >
 > ```bash
-> -c 262144 -ngl 99 --kv-dtype q8_0 --kvmem-budget 16384 --kvmem-gen-reserve 4096 \
+> --c 262144 -ngl 99 --kv-dtype q8_0 \
+>  --kvmem-budget 20480 --kvmem-gen-reserve 8192 --kvmem-block-tokens 32 \
 >  --port 8080 -ub 128 -b 512
 > ```
 > 
