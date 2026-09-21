@@ -1,9 +1,62 @@
 > [!IMPORTANT]
+>
+> **该 kvmem-llama.cpp 分支使用 PrismML 分支的 llama.cpp, 提供该分支的低比特格式与运行时功能。**
+> 
+> 支持运行模型 [Bonsai 2](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)，其他模型请使用主线版本。
+> 「[模型下载地址](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/tree/main)」
+> 
+> **显存需求**：最低 8G
+> 
+> - 8G 显存用户请使用 Ternary-Bonsai-2-27B-PTQ1_0.gguf。
+> 
+> - 12G 及以上显存推荐使用 Ternary-Bonsai-2-27B-PQ2_0.gguf 以获得更快的推理速度。
+> 
+> **内存需求**：推荐 Linux
+> 
+> - Linux 2g 基础内存, 256K 上下文约10.5G运行内存，可在16g内存机器运行。
+> 
+> - Windows 7.3g 基础内存，256K 上下文约15.8G运行内存，可在24g内存机器运行。
+> 
+> **推理速度**：
+> 
+> 使用 16g 内存，8g 显存的 RTX4060 笔记本推理，Prefill 200+ token/s，Decode 20+ token/s
+>
+> **推荐参数**：
+> 
+> ```bash
+> -c 262144 -ngl 99 --kv-dtype q8_0 --kvmem-budget 16384 --kvmem-gen-reserve 4096 \
+>  --port 8080 -ub 128 -b 512
+> ```
+> 
+> ---
 > **This is a fork version of kvmem-llama.cpp using PrismML fork of llama.cpp, providing the fork's low-bit formats and runtime features.**
 > 
->  See [Bonsai-demo](https://github.com/PrismML-Eng/Bonsai-demo) repo for further information about  ternary model.
+> Supports running the [Bonsai 2](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf) model. For other models, please use the mainline version.
+> 「[Download](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/tree/main)」
+>
+> **VRAM requirements**: minimum 8 GB
+>
+> - Users with 8 GB VRAM should use Ternary-Bonsai-2-27B-PTQ1_0.gguf.
+>
+> - Users with 12 GB VRAM or more are recommended to use Ternary-Bonsai-2-27B-PQ2_0.gguf for faster inference speed.
+>
+> **Memory requirements**: Linux recommended
+>
+> - Linux: 2 GB base memory; with a 256K context, about 10.5 GB runtime memory, and it can run on a 16 GB memory machine.
+>
+> - Windows: 7.3 GB base memory; with a 256K context, about 15.8 GB runtime memory, and it can run on a 24 GB memory machine.
+>
+> **Inference speed**:
+>
+> Using an RTX 4060 laptop with 16 GB memory and 8 GB VRAM for inference: Prefill 200+ token/s, Decode 20+ token/s.
+>
+> **Recommended parameters**:
+>
+> ```bash
+> -c 262144 -ngl 99 --kv-dtype q8_0 --kvmem-budget 16384 --kvmem-gen-reserve 4096 \
+>  --port 8080 -ub 128 -b 512
+> ```
 > 
->  And do not mix this fork's `ggml-*` libraries with a stock llama.cpp build.
 ---
 # KVMem + llama.cpp
 
