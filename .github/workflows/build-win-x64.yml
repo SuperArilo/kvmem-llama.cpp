@@ -161,8 +161,11 @@ jobs:
             Copy-Item "$bin/$e" "$dist/bin/$e"
           }
 
-          # resolve the DLL closure with dumpbin, the same way scripts/windows/package.ps1 does
-          $search = @((Resolve-Path $bin).Path, (Join-Path $env:CUDA_PATH 'bin'), (Join-Path $env:CUDA_PATH 'bin/x64'))
+          # resolve the DLL closure with dumpbin, the same way scripts/windows/package.ps1 does.
+          # the server links OpenSSL, which the runner image provides under Program Files.
+          $search = @((Resolve-Path $bin).Path,
+            (Join-Path $env:CUDA_PATH 'bin'), (Join-Path $env:CUDA_PATH 'bin/x64'),
+            (Join-Path ${env:ProgramFiles} 'OpenSSL/bin'), (Join-Path ${env:ProgramFiles} 'OpenSSL/bin/x64'))
           $queue  = [Collections.Generic.Queue[string]]::new()
           foreach ($e in $exes) { $queue.Enqueue((Resolve-Path "$dist/bin/$e").Path) }
           $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -185,8 +188,20 @@ jobs:
               if ($found) {
                 Copy-Item -LiteralPath $found -Destination "$dist/bin/$name"
                 $queue.Enqueue((Resolve-Path "$dist/bin/$name").Path)
-              } elseif (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32/$name"))) {
-                throw "unresolved DLL dependency: $name (from $file)"
+              } else {
+                # last resort: the OpenSSL install tree from the runner image
+                $sslRoot = Join-Path ${env:ProgramFiles} 'OpenSSL'
+                if (Test-Path -LiteralPath $sslRoot) {
+                  $hit = Get-ChildItem -LiteralPath $sslRoot -Filter $name -Recurse -File -ErrorAction SilentlyContinue |
+                    Select-Object -First 1
+                  if ($hit) { $found = $hit.FullName }
+                }
+                if ($found) {
+                  Copy-Item -LiteralPath $found -Destination "$dist/bin/$name"
+                  $queue.Enqueue((Resolve-Path "$dist/bin/$name").Path)
+                } elseif (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32/$name"))) {
+                  throw "unresolved DLL dependency: $name (from $file)"
+                }
               }
             }
           }
@@ -226,7 +241,9 @@ jobs:
           [IO.File]::WriteAllText("$dist/BUILD-INFO.json", ($info | ConvertTo-Json -Depth 5), $utf8)
 
           Get-ChildItem "$dist/bin" | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
-          if (-not (Test-Path "$dist/bin/cudart64_13.dll")) { throw "cudart64_13.dll missing from package" }
+          foreach ($req in 'cudart64_13.dll', 'libssl-3-x64.dll') {
+            if (-not (Test-Path "$dist/bin/$req")) { throw "$req missing from package" }
+          }
           Compress-Archive -Path "$dist/*" -DestinationPath "kvmem-win-x64-cuda13.2.86.zip" -Force
           Get-Item "kvmem-win-x64-cuda13.2.86.zip" | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
 
