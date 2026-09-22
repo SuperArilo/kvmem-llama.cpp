@@ -1,0 +1,259 @@
+name: build-win-x64
+
+# KVMem llama.cpp - Windows x64 CUDA 13.2.86 build
+#   - same CUDA baseline as the upstream v0.16.0-rc3 windows package
+#   - overlays the custom patch ci-patches/0001-qwen35-mtp-hadamard-inverse.patch
+#     on top of patches/llama-kvmem-current.patch
+#
+# Trigger: push to ci/win-x64, or manual dispatch.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/win-x64
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CUDA_VERSION: 13.2.86
+  CUDA_DIR: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2
+
+jobs:
+  win-x64-cuda13:
+    name: win-x64-cuda13.2.86
+    runs-on: windows-2022
+    timeout-minutes: 350
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.21
+        with:
+          key: win-x64-cuda132-millie
+          variant: ccache
+          evict-old-files: 1d
+          save: true
+
+      - name: Install CUDA ${{ env.CUDA_VERSION }}
+        shell: pwsh
+        run: |
+          $dir  = "${{ env.CUDA_DIR }}"
+          $base = "https://developer.download.nvidia.com/compute/cuda/redist"
+          $ver  = "${{ env.CUDA_VERSION }}"
+          $pkgs = @(
+            "cuda_crt/windows-x86_64/cuda_crt-windows-x86_64-$ver-archive.zip",
+            "cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-$ver-archive.zip",
+            "cuda_nvcc/windows-x86_64/cuda_nvcc-windows-x86_64-$ver-archive.zip",
+            "cuda_nvrtc/windows-x86_64/cuda_nvrtc-windows-x86_64-$ver-archive.zip",
+            "libnvvm/windows-x86_64/libnvvm-windows-x86_64-$ver-archive.zip",
+            "cuda_nvtx/windows-x86_64/cuda_nvtx-windows-x86_64-$ver-archive.zip",
+            "cuda_profiler_api/windows-x86_64/cuda_profiler_api-windows-x86_64-$ver-archive.zip",
+            "visual_studio_integration/windows-x86_64/visual_studio_integration-windows-x86_64-$ver-archive.zip",
+            "cuda_cccl/windows-x86_64/cuda_cccl-windows-x86_64-$ver-archive.zip",
+            "libcublas/windows-x86_64/libcublas-windows-x86_64-13.2.2.2-archive.zip"
+          )
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          foreach ($p in $pkgs) {
+            $zip = Join-Path $env:RUNNER_TEMP (Split-Path $p -Leaf)
+            curl.exe -sSL --retry 3 --retry-delay 5 -o $zip "$base/$p"
+            if ($LASTEXITCODE -ne 0) { throw "download failed: $p" }
+            $tmp = Join-Path $env:RUNNER_TEMP ("x_" + [IO.Path]::GetFileNameWithoutExtension($zip))
+            Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
+            $inner = Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1
+            Copy-Item -Path (Join-Path $inner.FullName '*') -Destination $dir -Recurse -Force
+          }
+          Add-Content $env:GITHUB_ENV "CUDA_PATH=$dir"
+          Add-Content $env:GITHUB_ENV "CUDA_HOME=$dir"
+          Add-Content $env:GITHUB_PATH (Join-Path $dir 'bin')
+          Add-Content $env:GITHUB_PATH (Join-Path $dir 'bin/x64')
+          & (Join-Path $dir 'bin/nvcc.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw 'nvcc not working' }
+
+      - name: Install Ninja
+        run: choco install ninja
+
+      - name: Apply patches
+        shell: pwsh
+        run: |
+          $llama = "llama.cpp"
+          git -C $llama apply --check ../patches/llama-kvmem-current.patch
+          if ($LASTEXITCODE -ne 0) { throw 'kvmem cumulative patch does not apply' }
+          git -C $llama apply ../patches/llama-kvmem-current.patch
+          if ($LASTEXITCODE -ne 0) { throw 'kvmem cumulative patch failed' }
+          $custom = "../ci-patches/0001-qwen35-mtp-hadamard-inverse.patch"
+          git -C $llama apply --check $custom
+          if ($LASTEXITCODE -ne 0) { throw 'custom MTP hadamard patch does not apply on top of the kvmem patch' }
+          git -C $llama apply $custom
+          if ($LASTEXITCODE -ne 0) { throw 'custom MTP hadamard patch failed' }
+          Write-Host "--- patched files ---"
+          git -C $llama status --porcelain
+          Write-Host "--- hadamard inverse call in the MTP graph ---"
+          Select-String -Path "$llama/src/models/qwen35.cpp" -Pattern 'llama_mul_mat_hadamard' | Select-Object -First 3 | Out-String | Write-Host
+
+      - name: Build
+        id: cmake_build
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          cmake -S . -B build -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_C_COMPILER=cl ^
+            -DCMAKE_CXX_COMPILER=cl ^
+            -DCMAKE_CUDA_COMPILER="%CUDA_PATH%\bin\nvcc.exe" ^
+            -DCMAKE_CUDA_ARCHITECTURES=89-real ^
+            -DBUILD_SHARED_LIBS=OFF ^
+            -DKVMEM_ENABLE_NVME=OFF ^
+            -DKVMEM_BUILD_LLAMA=ON ^
+            -DGGML_CUDA=ON ^
+            -DGGML_BACKEND_DL=OFF ^
+            -DGGML_NATIVE=OFF ^
+            -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DGGML_AVX512=OFF ^
+            -DGGML_CUDA_FA_ALL_QUANTS=ON
+          if errorlevel 1 exit /b 1
+          set /A NINJA_JOBS=%NUMBER_OF_PROCESSORS%-1
+          cmake --build build --parallel %NINJA_JOBS% --target llama-kvmem-server llama-kvmem-cli llama-quantize -- -k 0
+          if errorlevel 1 exit /b 1
+          dir build\bin
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $bin  = "build/bin"
+          $dist = "dist"
+          New-Item -ItemType Directory -Force -Path $dist, "$dist/bin", "$dist/scripts/windows", "$dist/licenses" | Out-Null
+
+          # dumpbin lives in the MSVC toolset - this step has no vcvars env, so locate it
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (-not $vs) { throw 'Visual Studio C++ toolset not found' }
+          $msvcVer = (Get-Content (Join-Path $vs 'VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt')).Trim()
+          $dumpbin = Join-Path $vs "VC/Tools/MSVC/$msvcVer/bin/Hostx64/x64/dumpbin.exe"
+          if (-not (Test-Path -LiteralPath $dumpbin)) { throw "dumpbin not found: $dumpbin" }
+          Write-Host "dumpbin: $dumpbin"
+
+          $exes = @("llama-kvmem-server.exe", "llama-kvmem-cli.exe", "llama-quantize.exe")
+          foreach ($e in $exes) {
+            if (-not (Test-Path "$bin/$e")) { throw "missing build output: $e" }
+            Copy-Item "$bin/$e" "$dist/bin/$e"
+          }
+
+          # resolve the DLL closure with dumpbin, the same way scripts/windows/package.ps1 does
+          $search = @((Resolve-Path $bin).Path, (Join-Path $env:CUDA_PATH 'bin'), (Join-Path $env:CUDA_PATH 'bin/x64'))
+          $queue  = [Collections.Generic.Queue[string]]::new()
+          foreach ($e in $exes) { $queue.Enqueue((Resolve-Path "$dist/bin/$e").Path) }
+          $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+          $runtimeDlls = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+          while ($queue.Count) {
+            $file = $queue.Dequeue()
+            $deps = & $dumpbin /NOLOGO /DEPENDENTS $file
+            if ($LASTEXITCODE -ne 0) { throw "dumpbin failed: $file" }
+            foreach ($line in $deps) {
+              if ($line -notmatch '^\s+([\w.\-]+\.dll)\s*$') { continue }
+              $name = $Matches[1]
+              if (-not $seen.Add($name)) { continue }
+              if ($name -match '^(msvcp|vcruntime|vcomp|concrt)\d') { $null = $runtimeDlls.Add($name); continue }
+              if ($name -ieq 'nvcuda.dll' -or $name -match '^(api-ms-|ext-ms-)') { continue }
+              $found = $null
+              foreach ($d in $search) {
+                $cand = Join-Path $d $name
+                if (Test-Path -LiteralPath $cand -PathType Leaf) { $found = $cand; break }
+              }
+              if ($found) {
+                Copy-Item -LiteralPath $found -Destination "$dist/bin/$name"
+                $queue.Enqueue((Resolve-Path "$dist/bin/$name").Path)
+              } elseif (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32/$name"))) {
+                throw "unresolved DLL dependency: $name (from $file)"
+              }
+            }
+          }
+          Write-Host ("external MSVC runtime dlls: " + ($runtimeDlls -join ', '))
+
+          foreach ($n in 'native-process.ps1', 'start-server.ps1', 'start-iq3.ps1', 'start-iq4.ps1') {
+            Copy-Item "scripts/windows/$n" "$dist/scripts/windows/$n"
+          }
+          Copy-Item "scripts/windows/README.md" "$dist/README.md"
+          Copy-Item "llama.cpp/LICENSE" "$dist/licenses/llama.cpp-MIT.txt"
+          Copy-Item "README.md" "$dist/licenses/KVMem-README.md"
+          Copy-Item "ci-patches/0001-qwen35-mtp-hadamard-inverse.patch" "$dist/provenance-mtp-hadamard-inverse.patch"
+
+          $cache = Get-Content "build/CMakeCache.txt" -Raw
+          $info = [ordered]@{
+            component        = 'Runtime'
+            status           = 'ci-windows-build'
+            version          = (Get-Content VERSION -Raw).Trim()
+            git_commit       = "${{ github.sha }}"
+            run              = "${{ github.run_id }}"
+            build_options    = @{
+              CMAKE_BUILD_TYPE        = 'Release'
+              CMAKE_CUDA_ARCHITECTURES = '89-real'
+              GGML_CUDA               = 'ON'
+              GGML_CUDA_FA_ALL_QUANTS = 'ON'
+              KVMEM_ENABLE_NVME       = 'OFF'
+              BUILD_SHARED_LIBS       = 'OFF'
+            }
+            nvcc             = ((& (Join-Path $env:CUDA_PATH 'bin/nvcc.exe') --version) -join "`n")
+            cpu_requirement  = 'x86_64 with AVX2, FMA, F16C and BMI2'
+            gpu_targets      = @('sm_89')
+            msvc_toolset     = $env:VCToolsVersion
+            patched          = @('patches/llama-kvmem-current.patch', 'ci-patches/0001-qwen35-mtp-hadamard-inverse.patch')
+            external_msvc_runtime_dlls = @($runtimeDlls)
+          }
+          $utf8 = [Text.UTF8Encoding]::new($false)
+          [IO.File]::WriteAllText("$dist/BUILD-INFO.json", ($info | ConvertTo-Json -Depth 5), $utf8)
+
+          Get-ChildItem "$dist/bin" | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
+          if (-not (Test-Path "$dist/bin/cudart64_13.dll")) { throw "cudart64_13.dll missing from package" }
+          Compress-Archive -Path "$dist/*" -DestinationPath "kvmem-win-x64-cuda13.2.86.zip" -Force
+          Get-Item "kvmem-win-x64-cuda13.2.86.zip" | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: kvmem-win-x64-cuda13.2.86
+          path: kvmem-win-x64-cuda13.2.86.zip
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: [win-x64-cuda13]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -la artifacts || true
+          TAG="win-x64-cuda13.2.86-r${{ github.run_number }}"
+          gh release create "$TAG" artifacts/*.zip \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "KVMem Windows x64 CUDA 13.2.86 ($TAG)" \
+            --notes "Windows x64 CUDA 13.2.86 runtime built from ${{ github.sha }}.
+
+          - sm_89 (Ada) CUDA targets only
+          - patches applied: patches/llama-kvmem-current.patch + ci-patches/0001-qwen35-mtp-hadamard-inverse.patch
+          - binaries: llama-kvmem-server.exe, llama-kvmem-cli.exe, llama-quantize.exe
+          - CUDA runtime dlls bundled, no toolkit needed at runtime
+
+          Extract the zip and run bin/llama-kvmem-server.exe from the package root." \
+          || echo "::warning::release upload failed (token permissions?) - grab the zip from the run artifacts"
