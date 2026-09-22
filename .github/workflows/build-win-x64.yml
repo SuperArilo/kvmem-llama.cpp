@@ -83,6 +83,19 @@ jobs:
       - name: Install Ninja
         run: choco install ninja
 
+      # The fork pins llama.cpp at f836e83f, but patches/llama-kvmem-current.patch is
+      # cut against merge base 997dc089e (patches/README.md) and only applies there.
+      - name: Pin llama.cpp to the patch base
+        shell: pwsh
+        run: |
+          $sha = "997dc089eb392e975134645393165216c7fbbc90"
+          git -C llama.cpp fetch --depth 1 origin $sha
+          if ($LASTEXITCODE -ne 0) { throw "cannot fetch $sha from the llama.cpp submodule remote" }
+          git -C llama.cpp checkout --force $sha
+          if ($LASTEXITCODE -ne 0) { throw "cannot check out $sha" }
+          git -C llama.cpp submodule update --init --recursive
+          git -C llama.cpp log --oneline -1
+
       - name: Apply patches
         shell: pwsh
         run: |
