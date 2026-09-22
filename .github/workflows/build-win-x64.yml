@@ -241,9 +241,14 @@ jobs:
           [IO.File]::WriteAllText("$dist/BUILD-INFO.json", ($info | ConvertTo-Json -Depth 5), $utf8)
 
           Get-ChildItem "$dist/bin" | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
-          foreach ($req in 'cudart64_13.dll', 'libssl-3-x64.dll') {
-            if (-not (Test-Path "$dist/bin/$req")) { throw "$req missing from package" }
-          }
+          # this is a static build: cudart is linked into the exe, cublas/cublasLt stay
+          # dynamic. Assert the CUDA runtime deps actually resolved instead of guessing
+          # a dll name.
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path "$dist/bin/libssl-3-x64.dll")) { throw 'libssl-3-x64.dll missing from package' }
+          $cublas = @(Get-ChildItem "$dist/bin" -Filter 'cublas*64_*.dll' -File -ErrorAction SilentlyContinue)
+          if ($cublas.Count -eq 0) { throw 'no cublas runtime dlls bundled - CUDA dependencies did not resolve' }
+          Write-Host ("bundled CUDA runtime dlls: " + ($cublas.Name -join ', '))
           Compress-Archive -Path "$dist/*" -DestinationPath "kvmem-win-x64-cuda13.2.86.zip" -Force
           Get-Item "kvmem-win-x64-cuda13.2.86.zip" | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
 
