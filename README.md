@@ -11,11 +11,9 @@
 > 
 > - 12G 及以上显存推荐使用 Ternary-Bonsai-2-27B-PQ2_0.gguf 以获得更快的推理速度。
 > 
-> **内存需求**：推荐 Linux
+> **内存需求**：最低 16G
 > 
-> - Linux 2g 基础内存, 256K 上下文约10.5G运行内存，可在16g内存机器运行。
-> 
-> - Windows 7.3g 基础内存，256K 上下文约15.8G运行内存，可在24g内存机器运行。
+> -  256K 上下文约10.5G运行内存，可在16g内存机器运行。
 > 
 > **推理速度**：
 > 
@@ -24,7 +22,7 @@
 > **推荐参数**：
 > 
 > ```bash
-> -c 262144 -ngl 99 --kv-dtype q8_0 \
+> -c 262144 -ngl 99 --kv-dtype q8_0 --load-mode none \
 >  --kvmem-budget 20480 --kvmem-gen-reserve 8192 --kvmem-block-tokens 32 \
 >  --port 8080 -ub 128 -b 512
 > ```
@@ -41,11 +39,9 @@
 >
 > - Users with 12 GB VRAM or more are recommended to use Ternary-Bonsai-2-27B-PQ2_0.gguf for faster inference speed.
 >
-> **Memory requirements**: Linux recommended
+> **Memory requirements**: minimum 16 GB
 >
-> - Linux: 2 GB base memory; with a 256K context, about 10.5 GB runtime memory, and it can run on a 16 GB memory machine.
->
-> - Windows: 7.3 GB base memory; with a 256K context, about 15.8 GB runtime memory, and it can run on a 24 GB memory machine.
+> - 256K context, about 10.5 GB runtime memory. Can run on a 16 GB memory machine.
 >
 > **Inference speed**:
 >
@@ -54,7 +50,7 @@
 > **Recommended parameters**:
 >
 > ```bash
-> --c 262144 -ngl 99 --kv-dtype q8_0 \
+> --c 262144 -ngl 99 --kv-dtype q8_0  --load-mode none\
 >  --kvmem-budget 20480 --kvmem-gen-reserve 8192 --kvmem-block-tokens 32 \
 >  --port 8080 -ub 128 -b 512
 > ```
@@ -161,7 +157,7 @@ scripts/apply-patches.sh
 scripts/build-cuda.sh
 ```
 
-The submodule pins the KVMem integration branch `kvmem/prism-merge` of the llama.cpp fork: PrismML `prism` merged into ggml-org `b81c99b`. `scripts/apply-patches.sh` applies `patches/llama-kvmem-current.patch`, the cumulative diff against merge base `997dc089e` (or `multimodal-upgrade.patch` on an older KVMem tree). Running it twice is safe. Do **not** apply numbered `0001`–`0004` together with the cumulative patch. See [patches/README.md](patches/README.md).
+The submodule pins the KVMem integration branch `kvmem/prism` of the llama.cpp fork, based on PrismML `prism` `9a9394a`. `scripts/apply-patches.sh` applies `patches/llama-kvmem-current.patch`, the cumulative diff against `9a9394a` (or `multimodal-upgrade.patch` on an older KVMem tree). Running it twice is safe. Do **not** apply numbered `0001`–`0004` together with the cumulative patch. See [patches/README.md](patches/README.md).
 
 `scripts/build-cuda.sh` sets `GGML_CUDA_FA_ALL_QUANTS=ON` (needed for `--kv-dtype q5_0` on hybrid models). Binaries: `build/bin/llama-kvmem-server`.
 
@@ -169,7 +165,7 @@ The build script defaults to `CMAKE_CUDA_ARCHITECTURES=120a-real` for the tested
 
 ## Browser chat
 
-The updated Windows rc3 runtime packages include both UIs: **full UI by default** at `share/kvmem/ui`, plus the lightweight UI at `share/kvmem/ui-lightweight`. The normal IQ3/IQ4 launch scripts enable the full UI automatically. To choose the lightweight UI, append `-UiDir '.\share\kvmem\ui-lightweight'` when running from the extracted package directory; `-NoUi` disables UI. Download the runtime ZIP again if you have the original lightweight-only rc3 package. Full UI does not add server-side tool execution or stream resumption to the KVMem backend.
+The updated Windows rc3 runtime packages include both UIs: **full UI by default** at `share/kvmem/ui`, plus the lightweight UI at `share/kvmem/ui-lightweight`. Their independent `start-iq3.ps1` / `start-iq4.ps1` scripts accept only `-Model`, `-Mmproj` and optional `-Gpu` (default `0`, index or UUID). They directly invoke the server and no longer use shared launch helpers. To choose the lightweight UI, edit `$UiDir` in the script to end in `share\kvmem\ui-lightweight`; to disable UI, replace `--webui` with `--no-ui`. Edit `$Port = 18200` to change the port. Download the runtime ZIP again for these updated scripts. Full UI does not add server-side tool execution or stream resumption to the KVMem backend. See the [Windows runtime guide](scripts/windows/README.md) for a complete launch command.
 
 The optional lightweight UI reuses llama.cpp's Markdown/code renderer, input components and browser-local history. It supports text and images, separate thinking effort/budget controls, stopping generation, and server-measured decode speed. It does not execute tools or manage model loading.
 
@@ -377,9 +373,9 @@ llama-kvmem-server -m model.gguf -ctk q8_0 -ctv q4_0
 ```
 
 The Linux recipes accept `--cache-type-k q8_0 --cache-type-v q4_0`;
-Windows recipes accept `-CacheTypeK q8_0 -CacheTypeV q4_0`. These optional
-settings override the recipe defaults for each component independently.
-Existing recipe defaults are unchanged.
+in the updated Windows rc3 runtime scripts, edit `-ctk q8_0 -ctv q4_0`
+directly in the script. The older source launcher also accepts
+`-CacheTypeK q8_0 -CacheTypeV q4_0`. Existing recipe defaults are unchanged.
 
 Flag compatibility does not imply support for every llama.cpp cache type or
 mixed K/V combination. These flags affect the main model; MTP cache precision
@@ -435,7 +431,7 @@ Pass the downloaded projector explicitly with `MMPROJ=/path/mmproj-Qwen3.8-27B-Q
 --enable-thinking --reasoning-budget 4096
 ```
 
-IQ3 now defaults to CPU vision (`--no-mmproj-offload`) to leave more GPU memory for inference. Vision remains available. To explicitly use GPU vision, set `MMPROJ_DEVICE=gpu` on Linux/WSL or pass `-VisionDevice gpu` to the Windows launcher. Historical performance tables below retain their original projector placement.
+IQ3 now defaults to CPU vision (`--no-mmproj-offload`) to leave more GPU memory for inference. Vision remains available. To explicitly use GPU vision, set `MMPROJ_DEVICE=gpu` on Linux/WSL; in the updated Windows rc3 runtime script, replace `--no-mmproj-offload` with `--mmproj-offload`. Historical performance tables below retain their original projector placement.
 
 ### IQ4 27B — optional experimental comparison
 
