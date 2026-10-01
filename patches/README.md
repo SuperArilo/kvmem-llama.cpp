@@ -1,11 +1,23 @@
 # llama.cpp patch replay
 
-`llama-kvmem-current.patch` is the cumulative diff against Prism `9a9394a`.
+`llama-kvmem-current.patch` is the cumulative diff cut against Prism `9a9394a`.
+It still applies cleanly on the current upstream `prism` tip `bdc23b56`
+(19 commits ahead; only two context offsets: `src/models/qwen35.cpp` hunk #4
+by +14 lines, `tests/test-backend-ops.cpp` hunk #1 by +25 lines, checked with
+`git apply --check` on 2026-10-01), and the CI workflow pins that commit.
 It includes the existing KVMem hooks, multimodal batch, MTP, media
 parser and mtmd helper extensions, plus FP32 GDN Record/Fold for ReplaySSM.
 It also fixes reasoning-budget initialization from a template's generation prefix.
 `scripts/apply-patches.sh` applies it
 without creating commits and checks for an already applied tree.
+
+The former `ci-patches/0001-qwen35-mtp-hadamard-inverse.patch` is retired:
+upstream commit `518ad108` ("qwen35: apply the Hadamard inverse to the MTP
+token-embedding lookup", PR #205) carries the same fix, so the local patch no
+longer applies and must not be overlaid. It is kept as
+`ci-patches/0001-qwen35-mtp-hadamard-inverse.patch.retired-20261001` for
+reference. Upstream `288859a9` (PR #210) does the same for the dflash
+borrowed embedding and head.
 
 `reasoning-budget-upgrade.patch` upgrades the v0.15.0 ReplaySSM tree.
 `replayssm-upgrade.patch` upgrades the preceding multimodal/query-replay tree.

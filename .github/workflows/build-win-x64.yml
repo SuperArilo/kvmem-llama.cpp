@@ -2,8 +2,10 @@ name: build-win-x64
 
 # KVMem llama.cpp - Windows x64 CUDA 13.2.86 build
 #   - same CUDA baseline as the upstream v0.16.0-rc3 windows package
-#   - overlays the custom patch ci-patches/0001-qwen35-mtp-hadamard-inverse.patch
-#     on top of patches/llama-kvmem-current.patch
+#   - overlays patches/llama-kvmem-current.patch on Prism bdc23b56
+#   - the MTP Hadamard inverse is upstream since 518ad108 (PR #205), so the
+#     former ci-patches/0001-qwen35-mtp-hadamard-inverse.patch is retired
+#     (kept as ci-patches/0001-qwen35-mtp-hadamard-inverse.patch.retired-20261001)
 #
 # Trigger: push to ci/win-x64, or manual dispatch.
 
@@ -83,14 +85,16 @@ jobs:
       - name: Install Ninja
         run: choco install ninja
 
-      # The fork's submodule tracks 4402c141 ("kvmem: adapter hooks on Prism 9a9394a"),
-      # but patches/llama-kvmem-current.patch is cut against its parent, Prism 9a9394a
-      # (patches/README.md), and only applies there. Applying it at 9a9394a reproduces
-      # 4402c141 byte-for-byte on every touched file (verified 2026-09-23).
+      # patches/llama-kvmem-current.patch is cut against Prism 9a9394a, but the
+      # upstream prism branch moved on and the patch still applies cleanly at
+      # bdc23b56 (19 commits ahead of 4402c141, two context offsets only:
+      # src/models/qwen35.cpp hunk #4 +14, tests/test-backend-ops.cpp hunk #1 +25,
+      # verified 2026-10-01 with git apply --check). The pins below and the
+      # submodule gitlink now point at that commit.
       - name: Pin llama.cpp to the patch base
         shell: pwsh
         run: |
-          $sha = "9a9394a895b96003ca842a6041cb28ac49a108f7"
+          $sha = "bdc23b56b4458b9f1655aec5287f3ab56ee8daaa"
           git -C llama.cpp fetch --depth 1 origin $sha
           if ($LASTEXITCODE -ne 0) { throw "cannot fetch $sha from the llama.cpp submodule remote" }
           git -C llama.cpp checkout --force $sha
@@ -106,15 +110,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'kvmem cumulative patch does not apply' }
           git -C $llama apply ../patches/llama-kvmem-current.patch
           if ($LASTEXITCODE -ne 0) { throw 'kvmem cumulative patch failed' }
-          $custom = "../ci-patches/0001-qwen35-mtp-hadamard-inverse.patch"
-          git -C $llama apply --check $custom
-          if ($LASTEXITCODE -ne 0) { throw 'custom MTP hadamard patch does not apply on top of the kvmem patch' }
-          git -C $llama apply $custom
-          if ($LASTEXITCODE -ne 0) { throw 'custom MTP hadamard patch failed' }
           Write-Host "--- patched files ---"
           git -C $llama status --porcelain
-          Write-Host "--- hadamard inverse call in the MTP graph ---"
-          Select-String -Path "$llama/src/models/qwen35.cpp" -Pattern 'llama_mul_mat_hadamard' | Select-Object -First 3 | Out-String | Write-Host
+          Write-Host "--- hadamard inverse call in the MTP graph (upstream 518ad108) ---"
+          $hadamard = @(Select-String -Path "$llama/src/models/qwen35.cpp" -Pattern 'llama_mul_mat_hadamard')
+          if ($hadamard.Count -eq 0) { throw 'upstream MTP hadamard inverse is missing from qwen35.cpp' }
+          $hadamard | Select-Object -First 3 | Out-String | Write-Host
 
       - name: Build
         id: cmake_build
@@ -215,7 +216,6 @@ jobs:
           Copy-Item "scripts/windows/README.md" "$dist/README.md"
           Copy-Item "llama.cpp/LICENSE" "$dist/licenses/llama.cpp-MIT.txt"
           Copy-Item "README.md" "$dist/licenses/KVMem-README.md"
-          Copy-Item "ci-patches/0001-qwen35-mtp-hadamard-inverse.patch" "$dist/provenance-mtp-hadamard-inverse.patch"
 
           $cache = Get-Content "build/CMakeCache.txt" -Raw
           $info = [ordered]@{
@@ -236,7 +236,8 @@ jobs:
             cpu_requirement  = 'x86_64 with AVX2, FMA, F16C and BMI2'
             gpu_targets      = @('sm_89')
             msvc_toolset     = $env:VCToolsVersion
-            patched          = @('patches/llama-kvmem-current.patch', 'ci-patches/0001-qwen35-mtp-hadamard-inverse.patch')
+            llama_cpp_base  = 'bdc23b56'
+            patched          = @('patches/llama-kvmem-current.patch')
             external_msvc_runtime_dlls = @($runtimeDlls)
           }
           $utf8 = [Text.UTF8Encoding]::new($false)
@@ -288,7 +289,7 @@ jobs:
             --notes "Windows x64 CUDA 13.2.86 runtime built from ${{ github.sha }}.
 
           - sm_89 (Ada) CUDA targets only
-          - patches applied: patches/llama-kvmem-current.patch + ci-patches/0001-qwen35-mtp-hadamard-inverse.patch
+          - patches applied: patches/llama-kvmem-current.patch (llama.cpp base Prism bdc23b56)
           - binaries: llama-kvmem-server.exe, llama-kvmem-cli.exe, llama-quantize.exe
           - CUDA runtime dlls bundled, no toolkit needed at runtime
 
